@@ -7,13 +7,13 @@ This work improves the melody generation model, EC2-VAE, with better chord contr
 Concretely, the framework of adversaril EC2-VAE is shown as below:
 
 <div align=center>
-<img src="img/diagram.png" width = "40%" />
+<img src="img/diagram.png" width = "60%" />
 </div>  
 
 The VAE model is trained to optimize the adversarial loss as follow:
 
 <div align=center>
-<img src="img/lss.png" width = "40%" />
+<img src="img/lss.png" width = "60%" />
 </div>  
 
 ## 2. Code and File Arrangement
