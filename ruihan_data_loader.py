@@ -3,14 +3,16 @@ from sklearn.utils import shuffle
 from tqdm import tqdm
 
 class MusicArrayLoader_ruihan():
-    def __init__(self, data_path, length, step_size):
-        self.dataset = np.load(data_path, allow_pickle=True)
+    def __init__(self, dataset, length, step_size, augment=True):
+        self.dataset = dataset
+        #print(self.dataset.shape)
         self.__length = length  # 32
         self.__chunk_melodies = []
         self.__chunk_chords = []
         self.__current_index = 0
         self.__step_size = step_size  # 16
         self.__epoch = 0
+        self.augment = augment
 
     def __clipping(self, melody, chord):
         """
@@ -32,11 +34,13 @@ class MusicArrayLoader_ruihan():
             if ((i + self.__length) < len_m) and (melody[i, 128] != 1):
                 melody_clip = melody[i:i + self.__length]
                 chord_clip = chord[i:i + self.__length]
-                for j in range(-6, 6, 1):
-                    clipped_melodies.append(self.melody_shift(melody_clip, j))
-                    clipped_chords.append(self.chord_shift(chord_clip, j))
-                    #clipped_melodies.append(melody[i:i + self.__length])
-                    #clipped_chords.append(chord[i:i + self.__length])
+                if self.augment:
+                    for j in range(-6, 6, 1):
+                        clipped_melodies.append(self.melody_shift(melody_clip, j))
+                        clipped_chords.append(self.chord_shift(chord_clip, j))
+                else:
+                    clipped_melodies.append(melody_clip)
+                    clipped_chords.append(chord_clip)
         return clipped_melodies, clipped_chords
 
     def melody_shift(self, melody, i):
@@ -98,6 +102,13 @@ class MusicArrayLoader_ruihan():
                     t:self.__current_index]
 
 if __name__ == "__main__":
-    dl = MusicArrayLoader_ruihan('G:/data.npy', 32, 16)
+    dataset = np.load('D:/Download/Program/xml/data.npy', allow_pickle=True)
+    dl = MusicArrayLoader_ruihan(dataset, 32, 16, augment=False)
     dl.chunking()
     print(dl.get_n_sample())
+    #dataset = np.load('D:/Download/Program/xml/data.npy', allow_pickle=True).T
+    #print(dataset.shape)
+    #np.random.shuffle(dataset)
+    #dataset = dataset.T
+    #print(dataset.shape)
+    
