@@ -10,7 +10,7 @@ with open('jingwei_adversarial_ec2vae/model_config.json') as f:
     args = json.load(f)
 weight_path = args['name']
 processor = midi_interface_mono_and_chord()
-model = VAE(130, args['hidden_dim'], 3, 12, args['pitch_dim'], args['rhythm_dim'], args['time_step'])
+model = VAE(130, args['Linux_hidden_dim'], 3, 12, args['pitch_dim'], args['rhythm_dim'], args['time_step'])
 #model = ensembleModel(130, args['hidden_dim'], 3, 12, args['pitch_dim'], args['rhythm_dim'], args['time_step']).cuda()
 params = torch.load(weight_path)['model_state_dict']
 from collections import OrderedDict
@@ -42,7 +42,7 @@ for item in os.listdir(data_root):
     out[arange, idx] = 1
     print(out.shape)
     midi_ReGen = processor.midiReconFromNumpy(np.concatenate((out, batch_with_NewChord[0, :, 130:]), axis=-1), tempo)
-    midi_ReGen.write(os.path.join(save_root, item+'_+4.mid'))
+    midi_ReGen.write(os.path.join(save_root, item+'_+1.mid'))
 
     """Melody_A = np.load(np.random.choice(data_list))
     Melody_B = np.load(np.random.choice(data_list))

@@ -53,7 +53,6 @@ def std_normal(shape):
         N.scale = N.scale.cuda()
     return N
 
-
 def loss_function_vae(recon,
                   recon_rhythm,
                   target_tensor,
@@ -75,12 +74,17 @@ def loss_function_vae(recon,
     KLD2 = kl_divergence(distribution_2, normal2).mean()
     return CE1 + CE2 + beta * (KLD1 + KLD2), CE1 + CE2, KLD1 + KLD2
 
-def loss_function_discr(chord_prediction, target_chord):
+def loss_function_discr(chord_prediction, target_chord, distribution_1, distribution_2, beta=.1):
     chord_prediction.view(-1, chord_prediction.size(-1))
     target_chord.view(-1, target_chord.size(-1))
     criterion = torch.nn.BCELoss(weight=None, reduction='mean')
     CE_chord = criterion(chord_prediction, target_chord)
-    return CE_chord
+    normal1 = std_normal(distribution_1.mean.size())
+    normal2 = std_normal(distribution_2.mean.size())
+    KLD1 = kl_divergence(distribution_1, normal1).mean()
+    KLD2 = kl_divergence(distribution_2, normal2).mean()
+    return CE_chord + beta * (KLD1 + KLD2), CE_chord, KLD1 + KLD2
+
 
 
 def train_vae(model, train_dataloader, epoch, loss_function_vae, loss_function_discr, optimizer, writer, args, beta=0.1):
@@ -112,7 +116,7 @@ def train_vae(model, train_dataloader, epoch, loss_function_vae, loss_function_d
         distribution_1 = Normal(dis1m, dis1s)
         distribution_2 = Normal(dis2m, dis2s)
         loss, l_recon, l_kl = loss_function_vae(recon, recon_rhythm, target_tensor, rhythm_target, distribution_1, distribution_2, beta=args['beta'])
-        loss_chord = loss_function_discr(chord_prediction, c)   #theoretical optimal value is ln2
+        loss_chord_KL, loss_chord, loss_KL = loss_function_discr(chord_prediction, c, distribution_1, distribution_2)   #theoretical optimal value is ln2
         #loss = loss + beta*loss_chord
         loss.backward()
         losses.update(loss.item())
@@ -173,12 +177,12 @@ def train_discr(model, train_dataloader, epoch, loss_function_vae, loss_function
             optimizer = optimizer_discr
             optimizer.zero_grad()
             (recon, recon_rhythm, dis1m, dis1s, dis2m, dis2s), chord_prediction = model(encode_tensor, c)
-            loss_chord = loss_function_discr(chord_prediction, c)
+            distribution_1 = Normal(dis1m, dis1s)
+            distribution_2 = Normal(dis2m, dis2s)
+            loss_chord_KL, loss_chord, loss_KL = loss_function_discr(chord_prediction, c, distribution_1, distribution_2)
             with torch.no_grad():
-                distribution_1 = Normal(dis1m, dis1s)
-                distribution_2 = Normal(dis2m, dis2s)
                 loss, l_recon, l_kl = loss_function_vae(recon, recon_rhythm, target_tensor, rhythm_target, distribution_1, distribution_2, beta=args['beta'])
-            loss_chord.backward()
+            loss_chord_KL.backward()
             losses.update(loss.item())
             losses_recon.update(l_recon.item())
             losses_kl.update(l_kl.item())
@@ -192,12 +196,12 @@ def train_discr(model, train_dataloader, epoch, loss_function_vae, loss_function
             optimizer = optimizer_enc
             optimizer.zero_grad()
             (recon, recon_rhythm, dis1m, dis1s, dis2m, dis2s), chord_prediction = model(encode_tensor, c)
-            loss_chord = loss_function_discr(chord_prediction, 1-c)
+            loss_chord_KL, loss_chord, loss_KL = loss_function_discr(chord_prediction, 1-c)
             with torch.no_grad():
                 distribution_1 = Normal(dis1m, dis1s)
                 distribution_2 = Normal(dis2m, dis2s)
                 loss, l_recon, l_kl = loss_function_vae(recon, recon_rhythm, target_tensor, rhythm_target, distribution_1, distribution_2, beta=args['beta'])
-            loss_chord.backward()
+            loss_chord_KL.backward()
             losses.update(loss.item())
             losses_recon.update(l_recon.item())
             losses_kl.update(l_kl.item())
@@ -227,7 +231,6 @@ def train_discr(model, train_dataloader, epoch, loss_function_vae, loss_function
         writer.add_scalar('train_discr/loss_recon-epoch', losses_recon.avg, epoch*len(train_dataloader)+step)
         writer.add_scalar('train_discr/loss_KL-epoch', losses_kl.avg, epoch*len(train_dataloader)+step)
         writer.add_scalar('train_discr/loss_chord-epoch', losses_chord.avg, epoch*len(train_dataloader)+step)
-
 
 def validation(model, val_dataloader, epoch, loss_function_vae, loss_function_discr, writer, args, beta=0.1):
     batch_time = AverageMeter()
@@ -259,7 +262,7 @@ def validation(model, val_dataloader, epoch, loss_function_vae, loss_function_di
             distribution_1 = Normal(dis1m, dis1s)
             distribution_2 = Normal(dis2m, dis2s)
             loss, l_recon, l_kl = loss_function_vae(recon, recon_rhythm, target_tensor, rhythm_target, distribution_1, distribution_2, beta=args['beta'])
-            loss_chord = loss_function_discr(chord_prediction, c)
+            loss_chord_KL, loss_chord, loss_KL = loss_function_discr(chord_prediction, c, distribution_1, distribution_2)
             loss = loss + beta*loss_chord
             losses.update(loss.item())
             losses_recon.update(l_recon.item())
@@ -284,7 +287,6 @@ def validation(model, val_dataloader, epoch, loss_function_vae, loss_function_di
     writer.add_scalar('val/loss_KL-epoch', losses_kl.avg, epoch)
     writer.add_scalar('val/loss_chord-epoch', losses_chord.avg, epoch)
     return losses_recon.avg
-
 
 def main():
     # some initialization
@@ -400,47 +402,9 @@ def main():
                 model.cuda()
                 val_loss_record = val_loss
 
-def train_ruihan(dl, args, optimizer, loss_function, writer, scheduler, step):
-    batch, c = dl.get_batch(args['batch_size'])
-    print(batch.shape, c.shape)
-    encode_tensor = torch.from_numpy(batch).float()
-    c = torch.from_numpy(c).float()
-    rhythm_target = np.expand_dims(batch[:, :, :-2].sum(-1), -1)
-    rhythm_target = np.concatenate((rhythm_target, batch[:, :, -2:]), -1)
-    rhythm_target = torch.from_numpy(rhythm_target).float()
-    rhythm_target = rhythm_target.view(-1, rhythm_target.size(-1)).max(-1)[1]
-    target_tensor = encode_tensor.view(-1, encode_tensor.size(-1)).max(-1)[1]
-    if torch.cuda.is_available():
-        encode_tensor = encode_tensor.cuda()
-        target_tensor = target_tensor.cuda()
-        rhythm_target = rhythm_target.cuda()
-        c = c.cuda()
-    optimizer.zero_grad()
-    recon, recon_rhythm, dis1m, dis1s, dis2m, dis2s = model(encode_tensor, c)
-    distribution_1 = Normal(dis1m, dis1s)
-    distribution_2 = Normal(dis2m, dis2s)
-    loss = loss_function(
-        recon,
-        recon_rhythm,
-        target_tensor,
-        rhythm_target,
-        distribution_1,
-        distribution_2,
-        step,
-        beta=args['beta'])
-    loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
-    optimizer.step()
-    step += 1
-    print('batch loss: {:.5f}'.format(loss.item()))
-    writer.add_scalar('batch_loss', loss.item(), step)
-    if args['decay'] > 0:
-        scheduler.step()
-    dl.shuffle_samples()
-    return step
 
 
-def train_vae_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, step_whole, model, train_dataloader, batch_size, loss_function_vae, loss_function_discr, optimizer, scheduler, writer, args, beta=0.1):
+def train_vae_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, step_whole, model, train_dataloader, batch_size, loss_function_vae, loss_function_discr, optimizer, scheduler_vae, scheduler_discr, scheduler_enc, writer, args, beta=0.1):
     batch, c = train_dataloader.get_batch(batch_size)    #batch : batch * 32 *142; c: batch * 32 * 12 
     encode_tensor = torch.from_numpy(batch).float()
     c = torch.from_numpy(c).float()
@@ -459,7 +423,7 @@ def train_vae_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, st
     distribution_1 = Normal(dis1m, dis1s)
     distribution_2 = Normal(dis2m, dis2s)
     loss, l_recon, l_kl = loss_function_vae(recon, recon_rhythm, target_tensor, rhythm_target, distribution_1, distribution_2, beta=args['beta'])
-    loss_chord = loss_function_discr(chord_prediction, c)   #theoretical optimal value is ln2
+    loss_chord_KL, loss_chord, loss_KL = loss_function_discr(chord_prediction, c, distribution_1, distribution_2)   #theoretical optimal value is ln2
     #loss = loss + beta*loss_chord
     loss.backward()
     losses.update(loss.item())
@@ -473,19 +437,25 @@ def train_vae_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, st
     print('---------------------------Training VAE----------------------------')
     for param in optimizer.param_groups:
         print('lr1: ', param['lr'])
-    print('Epoch: [{0}][{1}/{2}]'.format(train_dataloader.get_n_epoch(), step_whole + 1, train_dataloader.get_n_sample()))
+    num_batch = train_dataloader.get_n_sample() // batch_size
+    print('Epoch: [{0}][{1}/{2}]'.format(train_dataloader.get_n_epoch(), (step + 1)%num_batch, num_batch))
     print('loss: {loss:.5f}'.format(loss=losses.avg))
     writer.add_scalar('train_vae/loss_total-epoch', losses.avg, step)
     writer.add_scalar('train_vae/loss_recon-epoch', losses_recon.avg, step)
     writer.add_scalar('train_vae/loss_KL-epoch', losses_kl.avg, step)
     writer.add_scalar('train_vae/loss_chord-epoch', losses_chord.avg, step)
+    writer.add_scalar('train_vae/learning-rate', param['lr'], step)
 
     step += 1
+    step_whole += 1
     if args['decay'] > 0:
-        scheduler.step()
+        scheduler_vae.step()
+        #scheduler_discr.step()
+        #scheduler_enc.step()
+    #train_dataloader.shuffle_samples()
     return losses, losses_recon, losses_kl, losses_chord, step, step_whole
 
-def train_discr_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, step_whole, model, train_dataloader, batch_size, loss_function_vae, loss_function_discr, optimizer_discr, optimizer_enc, scheduler_discr, scheduler_enc, writer, args, beta=0.1):
+def train_discr_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, step_whole, model, train_dataloader, batch_size, loss_function_vae, loss_function_discr, optimizer_discr, optimizer_enc, scheduler_vae, scheduler_discr, scheduler_enc, writer, args, beta=0.1):
     batch, c = train_dataloader.get_batch(batch_size)    #batch : batch * 32 *142; c: batch * 32 * 12 
     encode_tensor = torch.from_numpy(batch).float()
     c = torch.from_numpy(c).float()
@@ -499,17 +469,17 @@ def train_discr_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, 
         target_tensor = target_tensor.cuda()
         rhythm_target = rhythm_target.cuda()
         c = c.cuda()
-    if step % 3 == 0:
-        target = 'Enc+Discr'
+    if step % 10 == 0 or (step-1) % 10 == 0:
+        target = 'Discr'
         optimizer = optimizer_discr
         optimizer.zero_grad()
         (recon, recon_rhythm, dis1m, dis1s, dis2m, dis2s), chord_prediction = model(encode_tensor, c)
-        loss_chord = loss_function_discr(chord_prediction, c)
+        distribution_1 = Normal(dis1m, dis1s)
+        distribution_2 = Normal(dis2m, dis2s)
+        loss_chord_KL, loss_chord, loss_KL = loss_function_discr(chord_prediction, c, distribution_1, distribution_2)
         with torch.no_grad():
-            distribution_1 = Normal(dis1m, dis1s)
-            distribution_2 = Normal(dis2m, dis2s)
             loss, l_recon, l_kl = loss_function_vae(recon, recon_rhythm, target_tensor, rhythm_target, distribution_1, distribution_2, beta=args['beta'])
-        loss_chord.backward()
+        loss_chord_KL.backward()
         losses.update(loss.item())
         losses_recon.update(l_recon.item())
         losses_kl.update(l_kl.item())
@@ -521,12 +491,12 @@ def train_discr_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, 
         optimizer = optimizer_enc
         optimizer.zero_grad()
         (recon, recon_rhythm, dis1m, dis1s, dis2m, dis2s), chord_prediction = model(encode_tensor, c)
-        loss_chord = loss_function_discr(chord_prediction, 1-c)
+        distribution_1 = Normal(dis1m, dis1s)
+        distribution_2 = Normal(dis2m, dis2s)
+        loss_chord_KL, loss_chord, loss_KL = loss_function_discr(chord_prediction, 1-c, distribution_1, distribution_2)
         with torch.no_grad():
-            distribution_1 = Normal(dis1m, dis1s)
-            distribution_2 = Normal(dis2m, dis2s)
             loss, l_recon, l_kl = loss_function_vae(recon, recon_rhythm, target_tensor, rhythm_target, distribution_1, distribution_2, beta=args['beta'])
-        loss_chord.backward()
+        loss_chord_KL.backward()
         losses.update(loss.item())
         losses_recon.update(l_recon.item())
         losses_kl.update(l_kl.item())
@@ -537,17 +507,22 @@ def train_discr_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, 
     print('---------------------------Training ' + target + ' ----------------------------')
     for param in optimizer.param_groups:
         print('lr1: ', param['lr'])
-    print('Epoch: [{0}][{1}/{2}]'.format(train_dataloader.get_n_epoch(), step_whole + 1, train_dataloader.get_n_sample()))
+    num_batch = train_dataloader.get_n_sample() // batch_size
+    print('Epoch: [{0}][{1}/{2}]'.format(train_dataloader.get_n_epoch(), (step + 1)%num_batch, num_batch))
     print('loss: {loss:.5f}'.format(loss=losses.avg))
     writer.add_scalar('train_discr/loss_total-epoch', losses.avg, step)
     writer.add_scalar('train_discr/loss_recon-epoch', losses_recon.avg, step)
     writer.add_scalar('train_discr/loss_KL-epoch', losses_kl.avg, step)
     writer.add_scalar('train_discr/loss_chord-epoch', losses_chord.avg, step)
+    writer.add_scalar('train_discr/learning-rate', param['lr'], step)
 
     step += 1
+    step_whole += 1
     if args['decay'] > 0:
+        #scheduler_vae.step()
         scheduler_discr.step()
         scheduler_enc.step()
+    #train_dataloader.shuffle_samples()
     return losses, losses_recon, losses_kl, losses_chord, step, step_whole
 
 def validation_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, epoch, model, val_dataloader, batch_size, loss_function_vae, loss_function_discr, writer, args, beta=0.1):
@@ -569,7 +544,7 @@ def validation_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, e
         distribution_1 = Normal(dis1m, dis1s)
         distribution_2 = Normal(dis2m, dis2s)
         loss, l_recon, l_kl = loss_function_vae(recon, recon_rhythm, target_tensor, rhythm_target, distribution_1, distribution_2, beta=args['beta'])
-        loss_chord = loss_function_discr(chord_prediction, c)
+        loss_chord_KL, loss_chord, loss_KL = loss_function_discr(chord_prediction, c, distribution_1, distribution_2)
         loss = loss + beta*loss_chord
         losses.update(loss.item())
         losses_recon.update(l_recon.item())
@@ -577,12 +552,13 @@ def validation_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, e
         losses_chord.update(loss_chord.item())
 
     print('----validation----')
-    print('Epoch: [{0}][{1}/{2}]'.format(epoch, step + 1, val_dataloader.get_n_sample()))
+    num_batch = val_dataloader.get_n_sample() // batch_size
+    print('Epoch: [{0}][{1}/{2}]'.format(epoch, step + 1, num_batch))
     print('loss: {loss:.5f}'.format(loss=losses.avg))
     
     step += 1
+    #val_dataloader.shuffle_samples()
     return losses, losses_recon, losses_kl, losses_chord, step, losses_recon.avg
-
 
 def main_ruihan():
     # some initialization
@@ -612,13 +588,14 @@ def main_ruihan():
     model = ensembleModel(130, hidden_dim, 3, 12, args['pitch_dim'], args['rhythm_dim'], args['time_step'])
     writer = SummaryWriter(logdir)
     optimizer_vae = optim.Adam(model.vae.parameters(), lr=args['lr'])
-    optimizer_discr = optim.Adam(model.chd_vae.parameters(), lr=args['lr'])
+    optimizer_discr = optim.Adam(model.discr.parameters(), lr=args['lr'])
     optimizer_enc = optim.Adam(model.encoder.parameters(), lr=args['lr'])
     optimizer_full = optim.Adam(model.parameters(), lr=args['lr'])
-    if args['decay'] > 0:
-        scheduler_vae = MinExponentialLR(optimizer_vae, gamma=args['decay'], minimum=1e-5,)
-        scheduler_discr = MinExponentialLR(optimizer_discr, gamma=args['decay'], minimum=1e-5,)
-        scheduler_enc = MinExponentialLR(optimizer_enc, gamma=args['decay'], minimum=1e-5,)
+    #if args['decay'] > 0:
+    scheduler_vae = MinExponentialLR(optimizer_vae, gamma=args['decay'], minimum=1e-5,)
+    scheduler_discr = MinExponentialLR(optimizer_discr, gamma=args['decay_discr'], minimum=1e-5,)
+    scheduler_enc = MinExponentialLR(optimizer_enc, gamma=args['decay_discr'], minimum=1e-5,)
+    #schedular_full = MinExponentialLR(optimizer_full, gamma=args['decay'], minimum=1e-5,)
     if torch.cuda.is_available():
         print('Using: ', torch.cuda.get_device_name(torch.cuda.current_device()))
         model.cuda()
@@ -635,6 +612,8 @@ def main_ruihan():
     val_data = val_data.T
     dl_train = MusicArrayLoader_ruihan(train_data, 32, 16, augment)
     dl_train.chunking()
+    dl_train_discr = MusicArrayLoader_ruihan(train_data, 32, 16, augment)
+    dl_train_discr.chunking()
     dl_val = MusicArrayLoader_ruihan(val_data, 32, 16, augment)
     dl_val.chunking()
 
@@ -653,10 +632,10 @@ def main_ruihan():
     losses_chord2 = AverageMeter()
     while dl_train.get_n_epoch() < args['n_epochs']:
         model.train()
-        for i in range(20):
-            losses1, losses_recon1, losses_kl1, losses_chord1, step_vae, step_whole = train_vae_for_ruihan(losses1, losses_recon1, losses_kl1, losses_chord1, step_vae, step_whole, model, dl_train, batch_size, loss_function_vae, loss_function_discr, optimizer_vae, scheduler_vae, writer, args)
-        for i in range(4):
-            losses2, losses_recon2, losses_kl2, losses_chord2, step_discr, step_whole = train_discr_for_ruihan(losses2, losses_recon2, losses_kl2, losses_chord2, step_discr, step_whole, model, dl_train, batch_size, loss_function_vae, loss_function_discr, optimizer_discr, optimizer_enc, scheduler_discr, scheduler_enc, writer, args)
+        for i in range(50):
+            losses1, losses_recon1, losses_kl1, losses_chord1, step_vae, step_whole = train_vae_for_ruihan(losses1, losses_recon1, losses_kl1, losses_chord1, step_vae, step_whole, model, dl_train, batch_size, loss_function_vae, loss_function_discr, optimizer_vae, scheduler_vae, scheduler_discr, scheduler_enc, writer, args)
+        for i in range(10):
+            losses2, losses_recon2, losses_kl2, losses_chord2, step_discr, step_whole = train_discr_for_ruihan(losses2, losses_recon2, losses_kl2, losses_chord2, step_discr, step_whole, model, dl_train_discr, batch_size, loss_function_vae, loss_function_discr, optimizer_discr, optimizer_enc, scheduler_vae, scheduler_discr, scheduler_enc, writer, args)
         if dl_train.get_n_epoch() != pre_epoch:
             step_val = 0
             losses3 = AverageMeter()
@@ -679,8 +658,10 @@ def main_ruihan():
             pre_epoch = dl_train.get_n_epoch()
             dl_train.shuffle_samples()
             dl_val.shuffle_samples()
+            dl_train_discr.shuffle_samples()
 
 
 if __name__ == '__main__':
+    #main()
     main_ruihan()
 

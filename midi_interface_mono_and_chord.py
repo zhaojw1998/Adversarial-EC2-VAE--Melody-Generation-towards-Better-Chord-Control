@@ -22,7 +22,7 @@ class midi_interface_mono_and_chord(object):
         idx = file_path.split('\\')[-1]
         melody_data = pyd.PrettyMIDI(os.path.join(file_path, idx+'.mid')) 
         chord_data = pyd.PrettyMIDI(os.path.join(file_path, idx+'_0.mid')) 
-        changed_chord_data = pyd.PrettyMIDI(os.path.join(file_path, idx+'_+4.mid')) 
+        changed_chord_data = pyd.PrettyMIDI(os.path.join(file_path, idx+'_+1.mid')) 
         tempo = melody_data.get_tempo_changes()[-1][0]
         melodySequence = self.getMelodySeq_byBeats(melody_data)
         chordSequence = self.getChordSeq_byBeats(chord_data)
