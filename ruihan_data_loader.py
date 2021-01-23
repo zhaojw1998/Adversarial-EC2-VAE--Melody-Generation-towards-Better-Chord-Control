@@ -35,7 +35,7 @@ class MusicArrayLoader_ruihan():
                 melody_clip = melody[i:i + self.__length]
                 chord_clip = chord[i:i + self.__length]
                 if self.augment:
-                    for j in range(-3, 3, 1):
+                    for j in range(-6, 6, 1):
                         clipped_melodies.append(self.melody_shift(melody_clip, j))
                         clipped_chords.append(self.chord_shift(chord_clip, j))
                 else:

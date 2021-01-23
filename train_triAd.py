@@ -469,7 +469,7 @@ def train_discr_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, 
         target_tensor = target_tensor.cuda()
         rhythm_target = rhythm_target.cuda()
         c = c.cuda()
-    if step % 10 == 0 or (step-1) % 10 == 0:
+    if step % 5 == 0:
         target = 'Discr'
         optimizer = optimizer_discr
         optimizer.zero_grad()
@@ -553,7 +553,7 @@ def validation_for_ruihan(losses, losses_recon, losses_kl, losses_chord, step, e
 
     print('----validation----')
     num_batch = val_dataloader.get_n_sample() // batch_size
-    print('Epoch: [{0}][{1}/{2}]'.format(epoch, step + 1, num_batch))
+    print('Epoch: [{0}][{1}/{2}]'.format(epoch+1, step + 1, num_batch))
     print('loss: {loss:.5f}'.format(loss=losses.avg))
     
     step += 1
@@ -565,13 +565,13 @@ def main_ruihan():
     with open('./jingwei_adversarial_ec2vae/model_config.json') as f:
         args = json.load(f)
     run_time = time.asctime(time.localtime(time.time())).replace(':', '-')
-    logdir = 'log/' + run_time[4:]
+    logdir = 'log-data_shift_test_20210115/' + run_time[4:]
     save_dir = 'params/' + run_time[4:]
     if platform.system() == 'Linux':
         logdir = os.path.join(args["Linux_log_save"], logdir)
         save_dir = os.path.join(args["Linux_log_save"], save_dir)
         batch_size = args['Linux_batch_size']
-        augment = False
+        augment = True
         data_path = args['Linux_data_path']
         hidden_dim = args['Linux_hidden_dim']
     else:
@@ -602,6 +602,8 @@ def main_ruihan():
     else:
         print('CPU mode')
     # end of initialization
+
+    #model = torch.nn.DataParallel(model, device_ids=[0, 1])
     
     dataset = np.load(data_path, allow_pickle=True).T
     np.random.shuffle(dataset)
@@ -616,6 +618,10 @@ def main_ruihan():
     dl_train_discr.chunking()
     dl_val = MusicArrayLoader_ruihan(val_data, 32, 16, augment)
     dl_val.chunking()
+
+    dl_train.shuffle_samples()
+    dl_val.shuffle_samples()
+    dl_train_discr.shuffle_samples()
 
     step_vae = 0
     step_discr = 0
@@ -634,7 +640,7 @@ def main_ruihan():
         model.train()
         for i in range(50):
             losses1, losses_recon1, losses_kl1, losses_chord1, step_vae, step_whole = train_vae_for_ruihan(losses1, losses_recon1, losses_kl1, losses_chord1, step_vae, step_whole, model, dl_train, batch_size, loss_function_vae, loss_function_discr, optimizer_vae, scheduler_vae, scheduler_discr, scheduler_enc, writer, args)
-        for i in range(10):
+        for i in range(5):
             losses2, losses_recon2, losses_kl2, losses_chord2, step_discr, step_whole = train_discr_for_ruihan(losses2, losses_recon2, losses_kl2, losses_chord2, step_discr, step_whole, model, dl_train_discr, batch_size, loss_function_vae, loss_function_discr, optimizer_discr, optimizer_enc, scheduler_vae, scheduler_discr, scheduler_enc, writer, args)
         if dl_train.get_n_epoch() != pre_epoch:
             step_val = 0
@@ -645,14 +651,14 @@ def main_ruihan():
             model.eval()
             while step_val < 20:
                 losses3, losses_recon3, losses_kl3, losses_chord3, step_val, loss = validation_for_ruihan(losses3, losses_recon3, losses_kl3, losses_chord3, step_val, pre_epoch, model, dl_val, batch_size, loss_function_vae, loss_function_discr, writer, args)
-            writer.add_scalar('val/loss_total-epoch', losses3.avg, pre_epoch)
-            writer.add_scalar('val/loss_recon-epoch', losses_recon3.avg, pre_epoch)
-            writer.add_scalar('val/loss_KL-epoch', losses_kl3.avg, pre_epoch)
-            writer.add_scalar('val/loss_chord-epoch', losses_chord3.avg, pre_epoch)
+            writer.add_scalar('val/loss_total-epoch', losses3.avg, pre_epoch+1)
+            writer.add_scalar('val/loss_recon-epoch', losses_recon3.avg, pre_epoch+1)
+            writer.add_scalar('val/loss_KL-epoch', losses_kl3.avg, pre_epoch+1)
+            writer.add_scalar('val/loss_chord-epoch', losses_chord3.avg, pre_epoch+1)
             #if loss < val_loss_record:
             #    val_loss_record = loss
             checkpoint = save_dir + '/best_fitted_params.pt'
-            torch.save({'epoch': pre_epoch, 'model_state_dict': model.vae.cpu().state_dict(), 'model_full_state_dict': model.cpu().state_dict(), 'optimizer_state_dict': optimizer_full.state_dict()}, checkpoint)
+            torch.save({'epoch': pre_epoch+1, 'model_state_dict': model.vae.cpu().state_dict(), 'model_full_state_dict': model.cpu().state_dict(), 'optimizer_state_dict': optimizer_full.state_dict()}, checkpoint)
             model.cuda()
             print('Model saved!')
             pre_epoch = dl_train.get_n_epoch()

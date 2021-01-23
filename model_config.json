@@ -1,7 +1,7 @@
 {
     "Linux_batch_size": 128,
     "batch_size": 32,
-    "n_epochs": 200,
+    "n_epochs": 20,
     "Linux_train_path": "/gpfsnyu/scratch/jz4807/nottingham_32beat-split_npy_train-val-split/nottingham_32beat-split_train.npy",
     "Linux_val_path": "/gpfsnyu/scratch/jz4807/nottingham_32beat-split_npy_train-val-split/nottingham_32beat-split_val.npy",
     "Linux_data_path": "/gpfsnyu/scratch/jz4807/data.npy",
@@ -10,7 +10,7 @@
     "data_path": "D:/Download/Program/xml/data.npy",
     "lr": 1e-3,
     "decay": 0.99995,
-    "decay_discr": 0.99983,
+    "decay_discr": 0.9995,
     "if_parallel": false,
     "resume": false,
     "name": "D:/Computer Music Research/01_Derek/params/temp 20200107/best_fitted_params.pt",

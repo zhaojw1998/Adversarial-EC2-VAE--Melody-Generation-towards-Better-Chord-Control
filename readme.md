@@ -13,7 +13,7 @@ Concretely, the framework of adversaril EC2-VAE is shown as below:
 The VAE model is trained to optimize the adversarial loss as follow:
 
 <div align=center>
-<img src="img/lss.png" width = "60%" />
+<img src="img/fomula.png" width = "60%" />
 </div>  
 
 ## 2. Code and File Arrangement

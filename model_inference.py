@@ -13,6 +13,7 @@ processor = midi_interface_mono_and_chord()
 model = VAE(130, args['Linux_hidden_dim'], 3, 12, args['pitch_dim'], args['rhythm_dim'], args['time_step'])
 #model = ensembleModel(130, args['hidden_dim'], 3, 12, args['pitch_dim'], args['rhythm_dim'], args['time_step']).cuda()
 params = torch.load(weight_path)['model_state_dict']
+#model.load_state_dict(params)
 from collections import OrderedDict
 renamed_params = OrderedDict()
 for k, v in params.items():
@@ -41,8 +42,8 @@ for item in os.listdir(data_root):
     arange = torch.arange(out.size(0)).long()
     out[arange, idx] = 1
     print(out.shape)
-    midi_ReGen = processor.midiReconFromNumpy(np.concatenate((out, batch_with_NewChord[0, :, 130:]), axis=-1), tempo)
-    midi_ReGen.write(os.path.join(save_root, item+'_+1.mid'))
+    midi_ReGen = processor.midiReconFromNumpy(np.concatenate((out, batch_with_NewChord[0, :, 130:]), axis=-1), tempo, vocal=False)
+    midi_ReGen.write(os.path.join(save_root, item+'_modal_change.mid'))
 
     """Melody_A = np.load(np.random.choice(data_list))
     Melody_B = np.load(np.random.choice(data_list))

@@ -22,7 +22,7 @@ class midi_interface_mono_and_chord(object):
         idx = file_path.split('\\')[-1]
         melody_data = pyd.PrettyMIDI(os.path.join(file_path, idx+'.mid')) 
         chord_data = pyd.PrettyMIDI(os.path.join(file_path, idx+'_0.mid')) 
-        changed_chord_data = pyd.PrettyMIDI(os.path.join(file_path, idx+'_+1.mid')) 
+        changed_chord_data = pyd.PrettyMIDI(os.path.join(file_path, idx+'_modal_change.mid')) 
         tempo = melody_data.get_tempo_changes()[-1][0]
         melodySequence = self.getMelodySeq_byBeats(melody_data)
         chordSequence = self.getChordSeq_byBeats(chord_data)
@@ -119,10 +119,13 @@ class midi_interface_mono_and_chord(object):
                     ChordSequence.append(chord['chord'])
         return ChordSequence
     
-    def midiReconFromSeq(self, melodySequence, ChordSequence, tempo):
+    def midiReconFromSeq(self, melodySequence, ChordSequence, tempo, vocal=True):
         minStep = 60 / tempo / 4
         midiRecon = pyd.PrettyMIDI(initial_tempo=tempo)
-        program = pyd.instrument_name_to_program('Violin')
+        if vocal:
+            program = pyd.instrument_name_to_program('Violin')
+        else:
+            program = pyd.instrument_name_to_program('Acoustic Grand Piano')
         melody = pyd.Instrument(program=program)
         program = pyd.instrument_name_to_program('Acoustic Grand Piano')
         chord = pyd.Instrument(program=program)
@@ -175,7 +178,7 @@ class midi_interface_mono_and_chord(object):
                 chordMatrix[idx, idxP%12] = 1
         return np.concatenate((melodyMatrix, chordMatrix), axis=-1)
 
-    def midiReconFromNumpy(self, matrix, tempo, ROLL_SIZE=130, CHORD_SIZE=12):
+    def midiReconFromNumpy(self, matrix, tempo, ROLL_SIZE=130, CHORD_SIZE=12, vocal=True):
         melodyMatrix = matrix[:, :ROLL_SIZE]
         chordMatrix = matrix[:, ROLL_SIZE:]
         melodySequence = [np.argmax(melodyMatrix[i]) for i in range(melodyMatrix.shape[0])]
@@ -184,7 +187,7 @@ class midi_interface_mono_and_chord(object):
             chordset = [idx for idx in range(CHORD_SIZE) if chordMatrix[i][idx] == 1]
             chordSequence.append(self.cl.note2name(chordset))
             #print(chordset)
-        return self.midiReconFromSeq(melodySequence, chordSequence, tempo)
+        return self.midiReconFromSeq(melodySequence, chordSequence, tempo, vocal)
     
     def numpySplit(self, matrix, WINDOWSIZE=32, HOPSIZE=16):
         splittedMatrix = np.empty((0, WINDOWSIZE, 142))
